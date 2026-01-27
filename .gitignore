@@ -4,7 +4,7 @@ Cargo.lock
 
 # Local env
 .env
-.env.*
+.env.local
 *.local
 
 # SQLite / state
