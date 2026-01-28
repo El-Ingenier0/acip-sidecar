@@ -38,6 +38,7 @@ Legend: **P0** = critical, **P1** = high, **P2** = medium, **P3** = low.
 - [ ] **Source reputation store**: persist per-source_id / per-host counters (seen, suspected_attacks, last_seen, last_attack_types).
 - [ ] **Raise risk for bad actors**: if source reputation is bad, bump threat_score / risk_level and cap tools even for non-markup unless explicitly overridden.
 - [ ] **Tests**: unit tests for taxonomy + detectors + reputation bumping.
+- [ ] **Integration tests (attack suite)**: add HTTP-level tests that POST /v1/acip/ingest_source with a corpus of attack fixtures (prompt injection, tool coercion, exfiltration, credential theft, jailbreak/social engineering) and assert invariants (e.g., tools hard-caps; risk escalation; threat fields populated).
 
 ## P3 (low)
 - [x] **Make `config.example.toml` match actual config schema fully** (document remaining keys as added).
