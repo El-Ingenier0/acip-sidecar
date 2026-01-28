@@ -8,7 +8,7 @@ Legend: **P0** = critical, **P1** = high, **P2** = medium, **P3** = low.
 ## P1 (high)
 - [x] **Add request size limits / body limits** for `ingest_source` (prevent DoS via huge JSON / base64 payloads). Consider axum `DefaultBodyLimit` + explicit max bytes for `bytes_b64`.
 - [x] **Add timeouts to outbound HTTP model calls** (`reqwest::Client::builder().timeout(...)`, connect/read timeouts). Prevent hangs.
-- [ ] **Token auth robustness**: treat multiple `X-ACIP-Token` headers / whitespace / non-UTF8 consistently; decide whether to allow bearer format. Consider constant-time compare (minor, but easy).
+- [x] **Token auth robustness**: treat multiple `X-ACIP-Token` headers / whitespace / non-UTF8 consistently; decide whether to allow bearer format. Consider constant-time compare (minor, but easy).
 
 ## P2 (medium)
 - [ ] **Use config values for `policies_file`** instead of `let _ = ...` placeholder; i.e., make config authoritative default while CLI overrides.
