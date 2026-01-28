@@ -119,8 +119,12 @@ struct IngestResponse {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     normalization_steps: Vec<String>,
 
-    /// Threat assessment derived from content (heuristics).
+    /// Threat summary safe for callers (non-oracle).
     threat: threat::ThreatAssessment,
+
+    /// Detailed threat indicators (operator/audit only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    threat_audit: Option<threat::ThreatAssessment>,
 
     tools_allowed: bool,
     risk_level: sentry::RiskLevel,
@@ -432,7 +436,18 @@ async fn ingest_source(
     let original_length_chars = raw.chars().count();
     let model_length_chars = model_text.chars().count();
 
-    let threat = threat::assess(&model_text);
+    let threat_full = threat::assess(&model_text);
+
+    let audit_mode = std::env::var("ACIP_AUDIT_MODE")
+        .map(|v| v.trim().eq("ENABLED"))
+        .unwrap_or(false);
+
+    let mut threat = threat_full.clone();
+    if !audit_mode {
+        // Avoid oracle leakage to callers.
+        threat.indicators.clear();
+    }
+    let threat_audit = if audit_mode { Some(threat_full) } else { None };
 
     let (trunc_text, truncated) = apply_head_tail(&state.policy, &model_text);
 
@@ -481,6 +496,7 @@ async fn ingest_source(
             normalized,
             normalization_steps: normalization_steps.clone(),
             threat: threat.clone(),
+            threat_audit: threat_audit.clone(),
             tools_allowed: d.tools_allowed,
             risk_level: d.risk_level,
             action: d.action,
@@ -558,6 +574,7 @@ async fn ingest_source(
         normalized,
         normalization_steps,
         threat,
+        threat_audit,
         tools_allowed: decision.tools_allowed,
         risk_level: decision.risk_level,
         action: decision.action,
@@ -843,6 +860,7 @@ mod ingest_response_tests {
             normalized: true,
             normalization_steps: vec!["x".to_string()],
             threat: threat::ThreatAssessment::none(),
+            threat_audit: None,
             tools_allowed: false,
             risk_level: sentry::RiskLevel::Low,
             action: sentry::Action::Allow,
@@ -857,6 +875,8 @@ mod ingest_response_tests {
         assert!(v.get("normalized").is_some());
         assert!(v.get("normalization_steps").is_some());
         assert!(v.get("threat").is_some());
+        // threat_audit is omitted when None
+        assert!(v.get("threat_audit").is_none());
     }
 
     #[test]
