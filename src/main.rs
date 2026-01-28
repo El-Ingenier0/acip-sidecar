@@ -14,7 +14,7 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::{error, info, warn};
 
 use moltbot_acip_sidecar::{
-    app, config, introspection, model_policy, policy_store, routes, secrets, sentry, state,
+    app, config, introspection, model_policy, policy_store, routes, secrets, sentry, state, threat,
 };
 
 #[derive(Parser, Debug)]
@@ -118,6 +118,9 @@ struct IngestResponse {
     /// Human-readable list of transformations applied to build model_text.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     normalization_steps: Vec<String>,
+
+    /// Threat assessment derived from content (heuristics).
+    threat: threat::ThreatAssessment,
 
     tools_allowed: bool,
     risk_level: sentry::RiskLevel,
@@ -429,6 +432,8 @@ async fn ingest_source(
     let original_length_chars = raw.chars().count();
     let model_length_chars = model_text.chars().count();
 
+    let threat = threat::assess(&model_text);
+
     let (trunc_text, truncated) = apply_head_tail(&state.policy, &model_text);
 
     // v0.2: run sentry enforcement.
@@ -475,6 +480,7 @@ async fn ingest_source(
             model_length_chars,
             normalized,
             normalization_steps: normalization_steps.clone(),
+            threat: threat.clone(),
             tools_allowed: d.tools_allowed,
             risk_level: d.risk_level,
             action: d.action,
@@ -521,6 +527,7 @@ async fn ingest_source(
         "original_length_chars": original_length_chars,
         "model_length_chars": model_length_chars,
         "truncated": truncated,
+        "threat": threat,
     });
 
     let decision = engine
@@ -550,6 +557,7 @@ async fn ingest_source(
         model_length_chars,
         normalized,
         normalization_steps,
+        threat,
         tools_allowed: decision.tools_allowed,
         risk_level: decision.risk_level,
         action: decision.action,
@@ -834,6 +842,7 @@ mod ingest_response_tests {
             model_length_chars: 9,
             normalized: true,
             normalization_steps: vec!["x".to_string()],
+            threat: threat::ThreatAssessment::none(),
             tools_allowed: false,
             risk_level: sentry::RiskLevel::Low,
             action: sentry::Action::Allow,
@@ -847,6 +856,7 @@ mod ingest_response_tests {
         assert!(v.get("model_length_chars").is_some());
         assert!(v.get("normalized").is_some());
         assert!(v.get("normalization_steps").is_some());
+        assert!(v.get("threat").is_some());
     }
 
     #[test]
