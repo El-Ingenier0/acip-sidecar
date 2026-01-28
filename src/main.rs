@@ -401,8 +401,17 @@ async fn main() -> anyhow::Result<()> {
 
     let _ = cfg_service.and_then(|svc| svc.user.as_ref());
     let _ = cfg_service.and_then(|svc| svc.group.as_ref());
-    let _ = cfg_security.and_then(|sec| sec.allow_insecure_loopback);
     let _ = cfg_policy.and_then(|policy| policy.policies_file.as_ref());
+
+    let allow_insecure_loopback = cfg_security
+        .and_then(|sec| sec.allow_insecure_loopback)
+        .unwrap_or(true);
+    let require_token_setting = cfg_security
+        .and_then(|sec| sec.require_token)
+        .unwrap_or(true);
+    let token_env = cfg_security
+        .and_then(|sec| sec.token_env.as_deref())
+        .unwrap_or("ACIP_AUTH_TOKEN");
 
     let effective_host = if let Some(host) = args.host.clone() {
         host
@@ -411,6 +420,9 @@ async fn main() -> anyhow::Result<()> {
     } else {
         DEFAULT_HOST.to_string()
     };
+
+    let ip: std::net::IpAddr = effective_host.parse()?;
+    let token_required = (!ip.is_loopback() || !allow_insecure_loopback) && require_token_setting;
 
     let effective_port = if let Some(port) = args.port {
         port
@@ -495,6 +507,23 @@ async fn main() -> anyhow::Result<()> {
     } else {
         Arc::new(secrets::EnvStore)
     };
+
+    let token_opt = if token_required {
+        match secrets.get(token_env) {
+            Some(token) if !token.trim().is_empty() => Some(token),
+            _ => {
+                anyhow::bail!(
+                    "auth token required but missing or empty in secrets store ({})",
+                    token_env
+                );
+            }
+        }
+    } else {
+        None
+    };
+    if token_opt.is_some() {
+        info!("auth token required");
+    }
 
     // Policy store: load from policies.json when provided, otherwise fall back
     // to env-configured single 'default' policy.

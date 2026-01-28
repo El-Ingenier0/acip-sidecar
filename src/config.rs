@@ -34,6 +34,8 @@ pub struct PolicyConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SecurityConfig {
     pub allow_insecure_loopback: Option<bool>,
+    pub require_token: Option<bool>,
+    pub token_env: Option<String>,
 }
 
 impl Config {
