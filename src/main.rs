@@ -143,6 +143,81 @@ fn apply_head_tail(policy: &state::Policy, text: &str) -> (String, bool) {
     (combined, true)
 }
 
+#[cfg(unix)]
+fn username_from_uid(uid: libc::uid_t) -> anyhow::Result<String> {
+    let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut result: *mut libc::passwd = std::ptr::null_mut();
+    let mut buf = vec![0u8; 1024];
+
+    loop {
+        let err = unsafe {
+            libc::getpwuid_r(
+                uid,
+                &mut pwd,
+                buf.as_mut_ptr() as *mut libc::c_char,
+                buf.len(),
+                &mut result,
+            )
+        };
+        if err == 0 {
+            if result.is_null() {
+                anyhow::bail!("no passwd entry for uid {}", uid);
+            }
+            let name = unsafe { std::ffi::CStr::from_ptr(pwd.pw_name) }
+                .to_string_lossy()
+                .into_owned();
+            return Ok(name);
+        }
+        if err == libc::ERANGE {
+            buf.resize(buf.len() * 2, 0);
+            continue;
+        }
+        anyhow::bail!(
+            "getpwuid_r failed for uid {}: {}",
+            uid,
+            std::io::Error::from_raw_os_error(err)
+        );
+    }
+}
+
+#[cfg(unix)]
+fn groupname_from_gid(gid: libc::gid_t) -> anyhow::Result<String> {
+    let mut grp: libc::group = unsafe { std::mem::zeroed() };
+    let mut result: *mut libc::group = std::ptr::null_mut();
+    let mut buf = vec![0u8; 1024];
+
+    loop {
+        let err = unsafe {
+            libc::getgrgid_r(
+                gid,
+                &mut grp,
+                buf.as_mut_ptr() as *mut libc::c_char,
+                buf.len(),
+                &mut result,
+            )
+        };
+        if err == 0 {
+            if result.is_null() {
+                anyhow::bail!("no group entry for gid {}", gid);
+            }
+            let name = unsafe { std::ffi::CStr::from_ptr(grp.gr_name) }
+                .to_string_lossy()
+                .into_owned();
+            return Ok(name);
+        }
+        if err == libc::ERANGE {
+            buf.resize(buf.len() * 2, 0);
+            continue;
+        }
+        anyhow::bail!(
+            "getgrgid_r failed for gid {}: {}",
+            gid,
+            std::io::Error::from_raw_os_error(err)
+        );
+    }
+}
+
+
 async fn health() -> impl IntoResponse {
     (StatusCode::OK, "ok")
 }
@@ -368,6 +443,41 @@ async fn main() -> anyhow::Result<()> {
     } else {
         DEFAULT_FULL_IF_LTE
     };
+
+    if let Some(service) = cfg_service {
+        let enforce_identity = service.enforce_identity.unwrap_or(true);
+        if enforce_identity {
+            #[cfg(unix)]
+            {
+                if service.user.is_some() || service.group.is_some() {
+                    let euid = unsafe { libc::geteuid() };
+                    let egid = unsafe { libc::getegid() };
+                    let current_user = username_from_uid(euid)?;
+                    let current_group = groupname_from_gid(egid)?;
+                    if let Some(expected) = service.user.as_deref() {
+                        if expected != current_user {
+                            anyhow::bail!(
+                                "service user mismatch: expected {}, running as {} (uid {})",
+                                expected,
+                                current_user,
+                                euid
+                            );
+                        }
+                    }
+                    if let Some(expected) = service.group.as_deref() {
+                        if expected != current_group {
+                            anyhow::bail!(
+                                "service group mismatch: expected {}, running as {} (gid {})",
+                                expected,
+                                current_group,
+                                egid
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 
 
     // Secrets: secrets file (optional) + env fallback.

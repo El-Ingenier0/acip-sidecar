@@ -14,6 +14,7 @@ pub struct Config {
 pub struct ServiceConfig {
     pub user: Option<String>,
     pub group: Option<String>,
+    pub enforce_identity: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
