@@ -38,11 +38,12 @@ struct Args {
     #[arg(long, default_value_t = 9000)]
     full_if_lte: usize,
 
-    /// Optional dotenv file to load secrets from (must be private: parent 700-ish, file 600-ish).
+    /// Optional secrets env file (must be private: parent 700-ish, file 600-ish).
     ///
-    /// If set, secrets are resolved from: dotenv → process env.
+    /// If set, secrets are resolved from: secrets file → process env.
+    /// Recommended system path: `/etc/acip/secrets.env`
     #[arg(long)]
-    dotenv: Option<PathBuf>,
+    secrets_file: Option<PathBuf>,
 }
 
 #[derive(Clone)]
@@ -237,15 +238,15 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
 
-    // Secrets: dotenv (optional) + env fallback.
-    let secrets: Arc<dyn secrets::SecretStore> = if let Some(dotenv_path) = &args.dotenv {
-        match secrets::DotEnvStore::load(dotenv_path) {
-            Ok(dotenv_store) => Arc::new(secrets::CompositeStore::new(vec![
-                Box::new(dotenv_store),
+    // Secrets: secrets file (optional) + env fallback.
+    let secrets: Arc<dyn secrets::SecretStore> = if let Some(path) = &args.secrets_file {
+        match secrets::EnvFileStore::load(path) {
+            Ok(file_store) => Arc::new(secrets::CompositeStore::new(vec![
+                Box::new(file_store),
                 Box::new(secrets::EnvStore),
             ])),
             Err(e) => {
-                // Fail closed: if a dotenv path is provided but unsafe/unreadable, refuse to start.
+                // Fail closed: if a secrets file path is provided but unsafe/unreadable, refuse to start.
                 return Err(e);
             }
         }

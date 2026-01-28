@@ -20,11 +20,14 @@ impl SecretStore for EnvStore {
     }
 }
 
-pub struct DotEnvStore {
+/// A simple key=value file store.
+///
+/// Intended default path for system installs: `/etc/acip/secrets.env`.
+pub struct EnvFileStore {
     map: HashMap<String, String>,
 }
 
-impl DotEnvStore {
+impl EnvFileStore {
     pub fn load(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
         ensure_secure_dotenv(&path)?;
@@ -53,7 +56,7 @@ impl DotEnvStore {
     }
 }
 
-impl SecretStore for DotEnvStore {
+impl SecretStore for EnvFileStore {
     fn get(&self, key: &str) -> Option<String> {
         self.map.get(key).cloned().filter(|v| !v.is_empty())
     }

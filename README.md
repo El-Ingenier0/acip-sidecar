@@ -26,11 +26,13 @@ For development you can use a local `.env` file (gitignored) *if* it is private:
 
 Run with:
 ```bash
-cargo run -- --dotenv ./.env
+cargo run -- --secrets-file ./.env
 ```
 
-Secrets resolution order when `--dotenv` is provided:
-1) `.env`
+For system installs, prefer `/etc/acip/secrets.env`.
+
+Secrets resolution order when `--secrets-file` is provided:
+1) secrets file
 2) process environment
 
 ## API (draft)
