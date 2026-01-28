@@ -42,3 +42,16 @@ See `docs/api.md`.
 - **Never** commit API keys.
 - Sidecar is designed for `127.0.0.1` only by default.
 - Treat all inputs as untrusted.
+
+## Loopback security behavior
+
+By default, when binding to loopback (e.g. `127.0.0.1`) the sidecar allows requests without `X-ACIP-Token`.
+
+To force token auth even on loopback, set in `config.toml`:
+
+```toml
+[security]
+allow_insecure_loopback = false
+require_token = true
+token_env = "ACIP_AUTH_TOKEN"
+```

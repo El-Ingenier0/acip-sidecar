@@ -17,5 +17,5 @@ Legend: **P0** = critical, **P1** = high, **P2** = medium, **P3** = low.
 - [x] **Reduce prompt bloat**: `DecisionEngine::build_prompt` includes full schema each call; consider caching schema text or using shorter schema reference.
 
 ## P3 (low)
-- [ ] **Make `config.example.toml` match actual config schema fully** (document remaining keys as added).
-- [ ] **Docs**: explain loopback default behavior and how token requirement changes when `allow_insecure_loopback=false`.
+- [x] **Make `config.example.toml` match actual config schema fully** (document remaining keys as added).
+- [x] **Docs**: explain loopback default behavior and how token requirement changes when `allow_insecure_loopback=false`.
