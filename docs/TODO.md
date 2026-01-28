@@ -40,9 +40,9 @@ Legend: **P0** = critical, **P1** = high, **P2** = medium, **P3** = low.
 - [ ] **Raise risk for bad actors**: if source reputation is bad, bump threat_score / risk_level and cap tools even for non-markup unless explicitly overridden.
 
 ## Tool-call gating (CIF alignment)
-- [ ] **Require explicit tool authorization**: default `tools_allowed=false` for all untrusted content; only allow tools if caller explicitly requests/authorizes via header (and policy permits).
-- [ ] **Docs**: document the tool-authorization header and expected behavior.
-- [ ] **Tests**: ensure model cannot enable tools without explicit authorization.
+- [x] **Require explicit tool authorization**: default `tools_allowed=false` for all untrusted content; only allow tools if caller explicitly requests/authorizes via header (and policy permits).
+- [x] **Docs**: document the tool-authorization header and expected behavior.
+- [x] **Tests**: ensure model cannot enable tools without explicit authorization.
 - [ ] **Tests**: unit tests for taxonomy + detectors + reputation bumping.
 - [ ] **Integration tests (attack suite)**: add HTTP-level tests that POST /v1/acip/ingest_source with a corpus of attack fixtures (prompt injection, tool coercion, exfiltration, credential theft, jailbreak/social engineering) and assert invariants (e.g., tools hard-caps; risk escalation; threat fields populated).
 

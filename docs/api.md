@@ -51,5 +51,6 @@ Exactly one of `text` or `bytes_b64` is required.
 - `bytes_b64` currently must decode to UTF-8 (PDF extraction/rendering is not implemented yet).
 - For HTML/SVG inputs, the sidecar builds a `model_text` (normalized) used for sentry decisions; `raw` is retained for digest/audit.
 - **Safety invariant**: for HTML/SVG inputs, `tools_allowed` is hard-capped to `false` regardless of model decision.
+- **Tool authorization**: even for non-markup content, `tools_allowed` is hard-capped to `false` unless the caller explicitly sets `X-ACIP-Allow-Tools: true`.
 - The sidecar validates model output against a strict JSON schema.
 - If L1 fails validation, it retries with L2.

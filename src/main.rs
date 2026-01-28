@@ -233,12 +233,35 @@ fn svg_to_text(svg: &str) -> String {
     parts.join("\n")
 }
 
+fn allow_tools_from_headers(headers: &HeaderMap) -> bool {
+    // Caller-controlled explicit authorization signal.
+    // Tools are never allowed based solely on untrusted content.
+    headers
+        .get("x-acip-allow-tools")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| matches!(s.trim().to_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false)
+}
+
 fn enforce_markup_tools_cap(mut decision: sentry::Decision, is_markup: bool) -> sentry::Decision {
     if is_markup && decision.tools_allowed {
         decision.tools_allowed = false;
         decision
             .reasons
             .push("tools hard-capped for markup content (html/svg)".to_string());
+    }
+    decision
+}
+
+fn enforce_tools_authorization(
+    mut decision: sentry::Decision,
+    allow_tools: bool,
+) -> sentry::Decision {
+    if decision.tools_allowed && !allow_tools {
+        decision.tools_allowed = false;
+        decision.reasons.push(
+            "tools not authorized by caller (set X-ACIP-Allow-Tools=true to allow)".to_string(),
+        );
     }
     decision
 }
@@ -343,6 +366,8 @@ async fn ingest_source(
     // Multi-policy selection (v0.1): validate policy selection early.
     // Unknown policy -> 400 (fail loud).
     let policy_name = routes::policy_name_from_headers(&headers);
+
+    let allow_tools = allow_tools_from_headers(&headers);
     if state.policies.require(&policy_name).is_err() {
         let mut names = state.policies.list();
         names.sort();
@@ -477,6 +502,7 @@ async fn ingest_source(
             vec!["sentry disabled (ACIP_SENTRY_MODE=stub)".to_string()],
         );
         d = enforce_markup_tools_cap(d, is_markup);
+        d = enforce_tools_authorization(d, allow_tools);
         // In stub mode we still allow content to be appended, but never allow tools.
         d.risk_level = sentry::RiskLevel::Medium;
         d.action = sentry::Action::Allow;
@@ -557,6 +583,7 @@ async fn ingest_source(
         .await;
 
     let decision = enforce_markup_tools_cap(decision, is_markup);
+    let decision = enforce_tools_authorization(decision, allow_tools);
 
     let resp = IngestResponse {
         digest: DigestInfo {
@@ -919,5 +946,21 @@ mod ingest_response_tests {
         let out = enforce_markup_tools_cap(d, true);
         assert!(!out.tools_allowed);
         assert!(out.reasons.iter().any(|r| r.contains("tools hard-capped")));
+    }
+
+    #[test]
+    fn tools_require_explicit_authorization() {
+        let d = sentry::Decision {
+            tools_allowed: true,
+            risk_level: sentry::RiskLevel::Low,
+            action: sentry::Action::Allow,
+            fenced_content: "```external\nx\n```".to_string(),
+            reasons: vec![],
+            detected_patterns: vec![],
+        };
+
+        let out = enforce_tools_authorization(d, false);
+        assert!(!out.tools_allowed);
+        assert!(out.reasons.iter().any(|r| r.contains("not authorized")));
     }
 }
