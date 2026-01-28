@@ -10,14 +10,13 @@ pub fn decision_schema() -> serde_json::Value {
       "required": ["tools_allowed", "risk_level", "action", "fenced_content", "reasons", "detected_patterns"],
       "properties": {
         "tools_allowed": {"type": "boolean"},
-        "tools_allowed_reason": {"type": "string"},
         "risk_level": {"type": "string", "enum": ["low", "medium", "high"]},
         "action": {"type": "string", "enum": ["allow", "sanitize", "block", "needs_review"]},
         "fenced_content": {"type": "string"},
         "reasons": {"type": "array", "items": {"type": "string"}},
         "detected_patterns": {"type": "array", "items": {"type": "string"}}
       },
-      "additionalProperties": true
+      "additionalProperties": false
     })
 }
 
