@@ -24,7 +24,7 @@ Legend: **P0** = critical, **P1** = high, **P2** = medium, **P3** = low.
 - [x] **HTML → structured text conversion** (minimally lossy): convert HTML to readable text/markdown-ish while preserving headings/lists/links as best we can.
 - [x] **Drop active HTML content**: ensure scripts/styles/iframes don’t make it into model_text; remove obvious JS URLs (e.g. `javascript:`).
 - [x] **SVG input handling**: treat as markup; extract visible text nodes only (no script) into model_text.
-- [ ] **Plumb audit metadata**: add response fields indicating `normalized=true`, original/extracted lengths, and a list of removed elements/patterns.
+- [x] **Plumb audit metadata**: add response fields indicating `normalized=true`, original/extracted lengths, and a list of removed elements/patterns.
 - [ ] **Tests**: add fixtures for HTML with script prompt injection and ensure model_text excludes script content.
 
 ## P3 (low)

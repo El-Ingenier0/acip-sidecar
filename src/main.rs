@@ -113,6 +113,12 @@ struct IngestResponse {
     /// Length of the model-facing text (after normalization, before truncation).
     model_length_chars: usize,
 
+    /// True if we transformed the original input before sending it to the sentry.
+    normalized: bool,
+    /// Human-readable list of transformations applied to build model_text.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    normalization_steps: Vec<String>,
+
     tools_allowed: bool,
     risk_level: sentry::RiskLevel,
     action: sentry::Action,
@@ -386,13 +392,26 @@ async fn ingest_source(
     let sha = hex::encode(hasher.finalize());
 
     // Normalization pipeline: keep `raw` for audit/digest, but generate separate model-facing text.
-    let model_text = if is_html_like(&source_type, &content_type, &raw) {
-        html_to_text(&raw)
-    } else if is_svg_like(&content_type, &raw) {
-        svg_to_text(&raw)
-    } else {
-        raw.clone()
-    };
+    let (model_text, normalized, normalization_steps) =
+        if is_html_like(&source_type, &content_type, &raw) {
+            (
+                html_to_text(&raw),
+                true,
+                vec![
+                    "strip_active_html_blocks".to_string(),
+                    "html_to_text".to_string(),
+                    "strip_javascript_scheme".to_string(),
+                ],
+            )
+        } else if is_svg_like(&content_type, &raw) {
+            (
+                svg_to_text(&raw),
+                true,
+                vec!["svg_to_text".to_string(), "drop_script_style".to_string()],
+            )
+        } else {
+            (raw.clone(), false, vec![])
+        };
 
     let original_length_chars = raw.chars().count();
     let model_length_chars = model_text.chars().count();
@@ -440,6 +459,8 @@ async fn ingest_source(
             },
             original_length_chars,
             model_length_chars,
+            normalized,
+            normalization_steps: normalization_steps.clone(),
             tools_allowed: d.tools_allowed,
             risk_level: d.risk_level,
             action: d.action,
@@ -511,6 +532,8 @@ async fn ingest_source(
         },
         original_length_chars,
         model_length_chars,
+        normalized,
+        normalization_steps,
         tools_allowed: decision.tools_allowed,
         risk_level: decision.risk_level,
         action: decision.action,
@@ -793,6 +816,8 @@ mod ingest_response_tests {
             },
             original_length_chars: 10,
             model_length_chars: 9,
+            normalized: true,
+            normalization_steps: vec!["x".to_string()],
             tools_allowed: false,
             risk_level: sentry::RiskLevel::Low,
             action: sentry::Action::Allow,
@@ -804,6 +829,8 @@ mod ingest_response_tests {
         let v = serde_json::to_value(resp).unwrap();
         assert!(v.get("original_length_chars").is_some());
         assert!(v.get("model_length_chars").is_some());
+        assert!(v.get("normalized").is_some());
+        assert!(v.get("normalization_steps").is_some());
     }
 
     #[test]
