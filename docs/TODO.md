@@ -25,7 +25,7 @@ Legend: **P0** = critical, **P1** = high, **P2** = medium, **P3** = low.
 - [x] **Drop active HTML content**: ensure scripts/styles/iframes don’t make it into model_text; remove obvious JS URLs (e.g. `javascript:`).
 - [x] **SVG input handling**: treat as markup; extract visible text nodes only (no script) into model_text.
 - [x] **Plumb audit metadata**: add response fields indicating `normalized=true`, original/extracted lengths, and a list of removed elements/patterns.
-- [ ] **Tests**: add fixtures for HTML with script prompt injection and ensure model_text excludes script content.
+- [x] **Tests**: add fixtures for HTML with script prompt injection and ensure model_text excludes script content.
 
 ## P3 (low)
 - [x] **Make `config.example.toml` match actual config schema fully** (document remaining keys as added).
