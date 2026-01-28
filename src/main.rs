@@ -1,6 +1,6 @@
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
@@ -12,8 +12,12 @@ use sha2::{Digest, Sha256};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::{error, info, warn};
 
+mod introspection;
 mod model_policy;
+mod policy_store;
+mod routes;
 mod secrets;
+mod state;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -44,20 +48,11 @@ struct Args {
     /// Recommended system path: `/etc/acip/secrets.env`
     #[arg(long)]
     secrets_file: Option<PathBuf>,
-}
 
-#[derive(Clone)]
-struct AppState {
-    policy: Policy,
-    secrets: Arc<dyn secrets::SecretStore>,
-    model_policy: model_policy::PolicyConfig,
-}
-
-#[derive(Clone, Debug)]
-struct Policy {
-    head: usize,
-    tail: usize,
-    full_if_lte: usize,
+    /// Policies JSON file (non-secret). Used with X-ACIP-Policy selection.
+    /// Recommended system path: `/etc/acip/policies.json`
+    #[arg(long)]
+    policies_file: Option<PathBuf>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -139,7 +134,7 @@ fn fence_external(s: &str) -> String {
     format!("```external\n{}\n```", s)
 }
 
-fn apply_head_tail(policy: &Policy, text: &str) -> (String, bool) {
+fn apply_head_tail(policy: &state::Policy, text: &str) -> (String, bool) {
     let len = text.chars().count();
     if len <= policy.full_if_lte {
         return (text.to_string(), false);
@@ -162,7 +157,8 @@ async fn health() -> impl IntoResponse {
 }
 
 async fn ingest_source(
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<state::AppState>>,
+    _headers: HeaderMap,
     Json(req): Json<IngestRequest>,
 ) -> impl IntoResponse {
     // v0.1 behavior:
@@ -254,35 +250,49 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(secrets::EnvStore)
     };
 
-    // Model policy (configurable). Defaults: Gemini Flash → Haiku fallback.
-    let mut mp = model_policy::PolicyConfig::default();
+    // Policy store: load from policies.json when provided, otherwise fall back
+    // to env-configured single 'default' policy.
+    let policies = if let Some(policies_path) = &args.policies_file {
+        let pf = policy_store::PoliciesFile::load(policies_path)?;
+        policy_store::PolicyStore::from_file(pf)
+    } else {
+        // Back-compat: derive the default policy from env.
+        let mut mp = model_policy::PolicyConfig::default();
 
-    if let Some(p) = secrets.get("ACIP_L1_PROVIDER") {
-        if let Some(parsed) = model_policy::Provider::parse(&p) {
-            mp.l1.provider = parsed;
-        } else {
-            warn!("Unknown ACIP_L1_PROVIDER={}; using default", p);
+        if let Some(p) = secrets.get("ACIP_L1_PROVIDER") {
+            if let Some(parsed) = model_policy::Provider::parse(&p) {
+                mp.l1.provider = parsed;
+            } else {
+                warn!("Unknown ACIP_L1_PROVIDER={}; using default", p);
+            }
         }
-    }
-    if let Some(m) = secrets.get("ACIP_L1_MODEL") {
-        mp.l1.model = m;
-    }
-
-    if let Some(p) = secrets.get("ACIP_L2_PROVIDER") {
-        if let Some(parsed) = model_policy::Provider::parse(&p) {
-            mp.l2.provider = parsed;
-        } else {
-            warn!("Unknown ACIP_L2_PROVIDER={}; using default", p);
+        if let Some(m) = secrets.get("ACIP_L1_MODEL") {
+            mp.l1.model = m;
         }
-    }
-    if let Some(m) = secrets.get("ACIP_L2_MODEL") {
-        mp.l2.model = m;
-    }
 
-    info!(
-        "model policy: L1={:?}/{}; L2={:?}/{}",
-        mp.l1.provider, mp.l1.model, mp.l2.provider, mp.l2.model
-    );
+        if let Some(p) = secrets.get("ACIP_L2_PROVIDER") {
+            if let Some(parsed) = model_policy::Provider::parse(&p) {
+                mp.l2.provider = parsed;
+            } else {
+                warn!("Unknown ACIP_L2_PROVIDER={}; using default", p);
+            }
+        }
+        if let Some(m) = secrets.get("ACIP_L2_MODEL") {
+            mp.l2.model = m;
+        }
+
+        info!(
+            "model policy: L1={:?}/{}; L2={:?}/{}",
+            mp.l1.provider, mp.l1.model, mp.l2.provider, mp.l2.model
+        );
+
+        policy_store::PolicyStore::default_from_env(
+            mp.l1.provider.clone(),
+            mp.l1.model.clone(),
+            mp.l2.provider.clone(),
+            mp.l2.model.clone(),
+        )
+    };
 
     // For v0.1 we don't *use* the provider keys yet, but we can warn early.
     if secrets.get("GEMINI_API_KEY").is_none() {
@@ -292,19 +302,22 @@ async fn main() -> anyhow::Result<()> {
         warn!("ANTHROPIC_API_KEY not set (ok for v0.1; required for Anthropic L2 fallback)");
     }
 
-    let state = Arc::new(AppState {
-        policy: Policy {
+    let state = Arc::new(state::AppState {
+        policy: state::Policy {
             head: args.head,
             tail: args.tail,
             full_if_lte: args.full_if_lte,
         },
         secrets,
-        model_policy: mp,
+        policies,
     });
 
     let app = Router::new()
         .route("/health", get(health))
         .route("/v1/acip/ingest_source", post(ingest_source))
+        .route("/v1/acip/schema", get(routes::get_schema))
+        .route("/v1/acip/policies", get(routes::list_policies))
+        .route("/v1/acip/policy", get(routes::get_policy))
         .with_state(state);
 
     let addr: SocketAddr = format!("{}:{}", args.host, args.port).parse()?;
