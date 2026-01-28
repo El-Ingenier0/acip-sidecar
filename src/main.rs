@@ -226,6 +226,16 @@ fn svg_to_text(svg: &str) -> String {
     parts.join("\n")
 }
 
+fn enforce_markup_tools_cap(mut decision: sentry::Decision, is_markup: bool) -> sentry::Decision {
+    if is_markup && decision.tools_allowed {
+        decision.tools_allowed = false;
+        decision
+            .reasons
+            .push("tools hard-capped for markup content (html/svg)".to_string());
+    }
+    decision
+}
+
 fn apply_head_tail(policy: &state::Policy, text: &str) -> (String, bool) {
     let len = text.chars().count();
     if len <= policy.full_if_lte {
@@ -391,27 +401,30 @@ async fn ingest_source(
     hasher.update(raw.as_bytes());
     let sha = hex::encode(hasher.finalize());
 
+    let is_html = is_html_like(&source_type, &content_type, &raw);
+    let is_svg = is_svg_like(&content_type, &raw);
+    let is_markup = is_html || is_svg;
+
     // Normalization pipeline: keep `raw` for audit/digest, but generate separate model-facing text.
-    let (model_text, normalized, normalization_steps) =
-        if is_html_like(&source_type, &content_type, &raw) {
-            (
-                html_to_text(&raw),
-                true,
-                vec![
-                    "strip_active_html_blocks".to_string(),
-                    "html_to_text".to_string(),
-                    "strip_javascript_scheme".to_string(),
-                ],
-            )
-        } else if is_svg_like(&content_type, &raw) {
-            (
-                svg_to_text(&raw),
-                true,
-                vec!["svg_to_text".to_string(), "drop_script_style".to_string()],
-            )
-        } else {
-            (raw.clone(), false, vec![])
-        };
+    let (model_text, normalized, normalization_steps) = if is_html {
+        (
+            html_to_text(&raw),
+            true,
+            vec![
+                "strip_active_html_blocks".to_string(),
+                "html_to_text".to_string(),
+                "strip_javascript_scheme".to_string(),
+            ],
+        )
+    } else if is_svg {
+        (
+            svg_to_text(&raw),
+            true,
+            vec!["svg_to_text".to_string(), "drop_script_style".to_string()],
+        )
+    } else {
+        (raw.clone(), false, vec![])
+    };
 
     let original_length_chars = raw.chars().count();
     let model_length_chars = model_text.chars().count();
@@ -443,6 +456,7 @@ async fn ingest_source(
             fence_external(&trunc_text),
             vec!["sentry disabled (ACIP_SENTRY_MODE=stub)".to_string()],
         );
+        d = enforce_markup_tools_cap(d, is_markup);
         // In stub mode we still allow content to be appended, but never allow tools.
         d.risk_level = sentry::RiskLevel::Medium;
         d.action = sentry::Action::Allow;
@@ -518,6 +532,8 @@ async fn ingest_source(
             &headers,
         )
         .await;
+
+    let decision = enforce_markup_tools_cap(decision, is_markup);
 
     let resp = IngestResponse {
         digest: DigestInfo {
@@ -857,5 +873,21 @@ mod ingest_response_tests {
         assert!(out.contains("Hello"));
         assert!(out.contains("World"));
         assert!(!out.contains("IGNORE"));
+    }
+
+    #[test]
+    fn markup_tools_are_hard_capped() {
+        let d = sentry::Decision {
+            tools_allowed: true,
+            risk_level: sentry::RiskLevel::Low,
+            action: sentry::Action::Allow,
+            fenced_content: "```external\nx\n```".to_string(),
+            reasons: vec![],
+            detected_patterns: vec![],
+        };
+
+        let out = enforce_markup_tools_cap(d, true);
+        assert!(!out.tools_allowed);
+        assert!(out.reasons.iter().any(|r| r.contains("tools hard-capped")));
     }
 }

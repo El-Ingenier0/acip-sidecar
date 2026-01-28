@@ -28,8 +28,8 @@ Legend: **P0** = critical, **P1** = high, **P2** = medium, **P3** = low.
 - [x] **Tests**: add fixtures for HTML with script prompt injection and ensure model_text excludes script content.
 
 ## MVP safety invariant: markup cannot enable tools
-- [ ] **Hard-cap tools for HTML/SVG**: if input is HTML-like or SVG-like, force `tools_allowed=false` regardless of model decision; record reason in response.
-- [ ] **Tests**: ensure even if model returns `tools_allowed=true`, HTML/SVG responses return `tools_allowed=false`.
+- [x] **Hard-cap tools for HTML/SVG**: if input is HTML-like or SVG-like, force `tools_allowed=false` regardless of model decision; record reason in response.
+- [x] **Tests**: ensure even if model returns `tools_allowed=true`, HTML/SVG responses return `tools_allowed=false`.
 
 ## P3 (low)
 - [x] **Make `config.example.toml` match actual config schema fully** (document remaining keys as added).
