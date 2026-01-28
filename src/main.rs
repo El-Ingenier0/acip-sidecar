@@ -249,11 +249,22 @@ async fn ingest_source(
     // - Return fenced content
     // - Default allow tools (real sentry model calls come later)
 
+    let IngestRequest {
+        source_id,
+        source_type,
+        content_type,
+        url,
+        title,
+        turn_id,
+        text,
+        bytes_b64,
+    } = req;
+
     let mut raw = None;
 
-    if let Some(t) = req.text {
+    if let Some(t) = text {
         raw = Some(t);
-    } else if let Some(b64) = req.bytes_b64 {
+    } else if let Some(b64) = bytes_b64 {
         match B64.decode(b64.as_bytes()) {
             Ok(bytes) => match String::from_utf8(bytes) {
                 Ok(s) => raw = Some(s),
@@ -320,12 +331,12 @@ async fn ingest_source(
     let engine = sentry::DecisionEngine::new(l1, l2);
 
     let source_meta = serde_json::json!({
-        "source_id": req.source_id,
-        "source_type": format!("{:?}", req.source_type),
-        "content_type": req.content_type,
-        "url": req.url,
-        "title": req.title,
-        "turn_id": req.turn_id,
+        "source_id": source_id,
+        "source_type": format!("{:?}", source_type),
+        "content_type": content_type,
+        "url": url,
+        "title": title,
+        "turn_id": turn_id,
         "digest_sha256": sha,
         "original_length_chars": raw.chars().count(),
         "truncated": truncated,
