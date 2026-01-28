@@ -221,8 +221,8 @@ impl DecisionEngine {
             l1m = policy.l1.model,
             l2p = policy.l2.provider,
             l2m = policy.l2.model,
-            schema = introspection::decision_schema().to_string(),
-            meta = source_meta.to_string(),
+            schema = introspection::decision_schema(),
+            meta = source_meta,
             content = fenced_external
         )
     }
@@ -258,22 +258,22 @@ impl DecisionEngine {
             Ok(out) => match parse_and_validate_decision(&out) {
                 Ok(d) => {
                     info!("sentry: L2 decision ok");
-                    return d;
+                    d
                 }
                 Err(e) => {
                     warn!("sentry: L2 output invalid: {e:#}");
-                    return Decision::fail_closed(
+                    Decision::fail_closed(
                         fenced_external.to_string(),
                         vec![format!("L1 failed; L2 invalid: {e:#}")],
-                    );
+                    )
                 }
             },
             Err(e) => {
                 warn!("sentry: L2 call failed: {e:#}");
-                return Decision::fail_closed(
+                Decision::fail_closed(
                     fenced_external.to_string(),
                     vec![format!("L1 failed; L2 failed: {e:#}")],
-                );
+                )
             }
         }
     }
