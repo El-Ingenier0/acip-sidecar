@@ -43,7 +43,7 @@ Legend: **P0** = critical, **P1** = high, **P2** = medium, **P3** = low.
 ## Installation & ops (MVP)
 - [x] **Create install guide**: prerequisites, build/run, config paths, secrets file, policies file.
 - [x] **Provide systemd unit template**: /etc/acip paths, service user/group, restart policy.
-- [ ] **Add install script** (best-effort): builds binary, creates user/group, writes unit + config example (no secrets), enables service.
+- [x] **Add install script** (best-effort): builds binary, creates user/group, writes unit + config example (no secrets), enables service.
 - [x] **Smoke test instructions**: curl health + ingest example.
 
 ## P3 (low)
