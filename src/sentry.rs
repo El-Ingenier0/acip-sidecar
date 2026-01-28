@@ -13,6 +13,8 @@ static DECISION_SCHEMA: Lazy<jsonschema::JSONSchema> = Lazy::new(|| {
     jsonschema::JSONSchema::compile(&schema).expect("decision schema must compile")
 });
 
+static DECISION_SCHEMA_TEXT: Lazy<String> = Lazy::new(|| introspection::decision_schema().to_string());
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum RiskLevel {
@@ -245,7 +247,7 @@ impl DecisionEngine {
             l1m = policy.l1.model,
             l2p = policy.l2.provider,
             l2m = policy.l2.model,
-            schema = introspection::decision_schema(),
+            schema = &*DECISION_SCHEMA_TEXT,
             meta = source_meta,
             content = fenced_external
         )
