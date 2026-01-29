@@ -1,0 +1,33 @@
+# User-level systemd unit (no root required)
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp packaging/moltbot-acip-sidecar.user.service ~/.config/systemd/user/moltbot-acip-sidecar.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now moltbot-acip-sidecar
+# Optional: keep it running while logged out:
+#   loginctl enable-linger $USER
+
+[Unit]
+Description=ACIP sidecar (user service)
+After=network.target
+
+[Service]
+Type=simple
+# Prefer user-local install. Adjust as needed.
+ExecStart=%h/.local/bin/moltbot-acip-sidecar --config %h/.config/acip/config.toml
+Restart=on-failure
+RestartSec=2
+
+# Environment
+Environment=RUST_LOG=info
+# For convenience: allow stubbing models in user mode if desired
+# Environment=ACIP_SENTRY_MODE=stub
+
+# Hardening (user scope)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+
+[Install]
+WantedBy=default.target
