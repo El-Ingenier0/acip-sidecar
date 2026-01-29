@@ -21,6 +21,7 @@ pub fn build_router(
             .route("/v1/acip/schema", get(routes::get_schema))
             .route("/v1/acip/policies", get(routes::list_policies))
             .route("/v1/acip/policy", get(routes::get_policy))
+            .route("/v1/acip/status", get(crate::status::get_status))
             .merge(extra_protected)
             // Limit request bodies (JSON + base64) to reduce DoS risk.
             .layer(DefaultBodyLimit::max(1_500_000)),

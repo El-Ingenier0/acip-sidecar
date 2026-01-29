@@ -13,8 +13,8 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::{error, info, warn};
 
 use moltbot_acip_sidecar::{
-    app, app_state_builder, config, introspection, model_policy, policy_store, reputation,
-    reputation_policy, routes, secrets, sentry, state, threat,
+    app, app_state_builder, config, introspection, model_policy, reputation, reputation_policy,
+    routes, sentry, server_config, startup, state, threat,
 };
 
 #[derive(Parser, Debug)]
@@ -670,7 +670,7 @@ async fn main() -> anyhow::Result<()> {
 
     let cfg_service = config.as_ref().and_then(|cfg| cfg.service.as_ref());
 
-    let cli = moltbot_acip_sidecar::server_config::CliOverrides {
+    let cli = server_config::CliOverrides {
         host: args.host.clone(),
         port: args.port,
         head: args.head,
@@ -679,15 +679,15 @@ async fn main() -> anyhow::Result<()> {
         policies_file: args.policies_file.clone(),
     };
 
-    let eff = moltbot_acip_sidecar::server_config::effective_settings(&cli, config.as_ref());
+    let eff = server_config::effective_settings(&cli, config.as_ref());
 
     let allow_insecure_loopback =
         moltbot_acip_sidecar::server_config::allow_insecure_loopback(config.as_ref());
     let require_token_setting =
         moltbot_acip_sidecar::server_config::require_token_setting(config.as_ref());
-    let token_env = moltbot_acip_sidecar::server_config::token_env(config.as_ref());
+    let token_env = server_config::token_env(config.as_ref());
 
-    let token_required = moltbot_acip_sidecar::server_config::compute_token_required(
+    let token_required = server_config::compute_token_required(
         &eff.host,
         allow_insecure_loopback,
         require_token_setting,
@@ -735,34 +735,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Secrets: secrets file (optional) + env fallback.
-    let secrets: Arc<dyn secrets::SecretStore> = if let Some(path) = &args.secrets_file {
-        match secrets::EnvFileStore::load(path) {
-            Ok(file_store) => Arc::new(secrets::CompositeStore::new(vec![
-                Box::new(file_store),
-                Box::new(secrets::EnvStore),
-            ])),
-            Err(e) => {
-                // Fail closed: if a secrets file path is provided but unsafe/unreadable, refuse to start.
-                return Err(e);
-            }
-        }
-    } else {
-        Arc::new(secrets::EnvStore)
-    };
+    let secrets = startup::build_secrets_store(args.secrets_file.clone())?;
 
-    let token_opt = if token_required {
-        match secrets.get(&token_env) {
-            Some(token) if !token.trim().is_empty() => Some(token),
-            _ => {
-                anyhow::bail!(
-                    "auth token required but missing or empty in secrets store ({})",
-                    token_env
-                );
-            }
-        }
-    } else {
-        None
-    };
+    let token_opt = startup::resolve_token(token_required, &secrets, &token_env)?;
     if token_opt.is_some() {
         info!("auth token required");
     }
@@ -784,47 +759,7 @@ async fn main() -> anyhow::Result<()> {
 
     let effective_policies_file: Option<PathBuf> = eff.policies_file.clone();
 
-    let policies = if let Some(policies_path) = &effective_policies_file {
-        let pf = policy_store::PoliciesFile::load(policies_path)?;
-        policy_store::PolicyStore::from_file(pf)
-    } else {
-        // Back-compat: derive the default policy from env.
-        let mut mp = model_policy::PolicyConfig::default();
-
-        if let Some(p) = secrets.get("ACIP_L1_PROVIDER") {
-            if let Some(parsed) = model_policy::Provider::parse(&p) {
-                mp.l1.provider = parsed;
-            } else {
-                warn!("Unknown ACIP_L1_PROVIDER={}; using default", p);
-            }
-        }
-        if let Some(m) = secrets.get("ACIP_L1_MODEL") {
-            mp.l1.model = m;
-        }
-
-        if let Some(p) = secrets.get("ACIP_L2_PROVIDER") {
-            if let Some(parsed) = model_policy::Provider::parse(&p) {
-                mp.l2.provider = parsed;
-            } else {
-                warn!("Unknown ACIP_L2_PROVIDER={}; using default", p);
-            }
-        }
-        if let Some(m) = secrets.get("ACIP_L2_MODEL") {
-            mp.l2.model = m;
-        }
-
-        info!(
-            "model policy: L1={:?}/{}; L2={:?}/{}",
-            mp.l1.provider, mp.l1.model, mp.l2.provider, mp.l2.model
-        );
-
-        policy_store::PolicyStore::default_from_env(
-            mp.l1.provider.clone(),
-            mp.l1.model.clone(),
-            mp.l2.provider.clone(),
-            mp.l2.model.clone(),
-        )
-    };
+    let policies = startup::build_policy_store(&secrets, effective_policies_file.clone())?;
 
     // For v0.1 we don't *use* the provider keys yet, but we can warn early.
     if secrets.get("GEMINI_API_KEY").is_none() {
