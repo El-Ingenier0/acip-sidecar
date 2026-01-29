@@ -9,13 +9,12 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::time::Duration;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::{error, info, warn};
 
 use moltbot_acip_sidecar::{
-    app, config, introspection, model_policy, policy_store, reputation, reputation_policy, routes,
-    secrets, sentry, state, threat,
+    app, app_state_builder, config, introspection, model_policy, policy_store, reputation,
+    reputation_policy, routes, secrets, sentry, state, threat,
 };
 
 #[derive(Parser, Debug)]
@@ -815,10 +814,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let http = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(5))
-        .timeout(Duration::from_secs(30))
-        .build()?;
+    let http = app_state_builder::build_http_client()?;
 
     // Policy store: load from policies.json when provided, otherwise fall back
     // to env-configured single 'default' policy.
@@ -879,8 +875,8 @@ async fn main() -> anyhow::Result<()> {
         warn!("ANTHROPIC_API_KEY not set (ok for v0.1; required for Anthropic L2 fallback)");
     }
 
-    let state = Arc::new(state::AppState {
-        policy: state::Policy {
+    let state = app_state_builder::build_app_state(
+        state::Policy {
             head: effective_head,
             tail: effective_tail,
             full_if_lte: effective_full_if_lte,
@@ -889,7 +885,7 @@ async fn main() -> anyhow::Result<()> {
         secrets,
         policies,
         reputation,
-    });
+    );
 
     // Apply token auth and body size limits to protected routes.
     let extra_protected = Router::new().route("/v1/acip/ingest_source", post(ingest_source));
