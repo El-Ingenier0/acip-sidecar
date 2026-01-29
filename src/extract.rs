@@ -352,9 +352,36 @@ pub fn run_helper(
                 Ok(())
             }
 
+            // Core sandbox-ish resource limits.
             setrlim(libc::RLIMIT_CPU, cpu_secs, cpu_secs)?;
             setrlim(libc::RLIMIT_AS, as_bytes, as_bytes)?;
             setrlim(libc::RLIMIT_NOFILE, nofile, nofile)?;
+
+            // No core dumps.
+            setrlim(libc::RLIMIT_CORE, 0, 0)?;
+
+            // Limit number of processes/threads to mitigate fork bombs.
+            // (Tesseract/poppler shouldn't need many.)
+            if let Ok(v) = std::env::var("ACIP_EXTRACTOR_RLIMIT_NPROC") {
+                if let Ok(nproc) = v.trim().parse::<u64>() {
+                    #[cfg(target_os = "linux")]
+                    {
+                        setrlim(libc::RLIMIT_NPROC, nproc, nproc)?;
+                    }
+                }
+            }
+
+            // Best-effort cap for max file size the helper can create (in bytes).
+            // Needed because OCR path writes images to a temp dir.
+            let fsize_mb: u64 = std::env::var("ACIP_EXTRACTOR_RLIMIT_FSIZE_MB")
+                .ok()
+                .and_then(|v| v.trim().parse::<u64>().ok())
+                .unwrap_or(512);
+            setrlim(
+                libc::RLIMIT_FSIZE,
+                fsize_mb * 1024 * 1024,
+                fsize_mb * 1024 * 1024,
+            )?;
 
             // Best-effort scheduler/IO deprioritization.
             // nice: increase niceness (lower priority)
@@ -363,6 +390,9 @@ pub fn run_helper(
                 .and_then(|v| v.trim().parse::<i32>().ok())
                 .unwrap_or(10);
             let _ = libc::nice(nice_inc);
+
+            // umask: ensure any temp files are private by default.
+            libc::umask(0o077);
 
             // ioprio_set: put into idle IO class when available (Linux).
             #[cfg(target_os = "linux")]
