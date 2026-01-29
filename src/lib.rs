@@ -4,6 +4,7 @@ pub mod introspection;
 pub mod model_policy;
 pub mod policy_store;
 pub mod reputation;
+pub mod reputation_policy;
 pub mod routes;
 pub mod secrets;
 pub mod sentry;

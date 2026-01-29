@@ -14,8 +14,8 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::{error, info, warn};
 
 use moltbot_acip_sidecar::{
-    app, config, introspection, model_policy, policy_store, reputation, routes, secrets, sentry,
-    state, threat,
+    app, config, introspection, model_policy, policy_store, reputation, reputation_policy, routes,
+    secrets, sentry, state, threat,
 };
 
 #[derive(Parser, Debug)]
@@ -473,7 +473,11 @@ async fn ingest_source(
         // Avoid oracle leakage to callers.
         threat.indicators.clear();
     }
-    let threat_audit = if audit_mode { Some(threat_full.clone()) } else { None };
+    let threat_audit = if audit_mode {
+        Some(threat_full.clone())
+    } else {
+        None
+    };
 
     // Update reputation store (best-effort, does not change decision yet).
     let host = url
@@ -481,7 +485,7 @@ async fn ingest_source(
         .and_then(|u| u.split("//").nth(1))
         .and_then(|rest| rest.split('/').next())
         .map(|h| h.to_lowercase());
-    let _recs = state.reputation.record(reputation::observation(
+    let recs = state.reputation.record(reputation::observation(
         source_id.clone(),
         host,
         threat.threat_score,
@@ -491,6 +495,8 @@ async fn ingest_source(
             .map(|t| format!("{:?}", t))
             .collect(),
     ));
+
+    let rep_thresholds = reputation_policy::ReputationThresholds::from_env();
 
     let (trunc_text, truncated) = apply_head_tail(&state.policy, &model_text);
 
@@ -521,6 +527,7 @@ async fn ingest_source(
         );
         d = enforce_markup_tools_cap(d, is_markup);
         d = enforce_tools_authorization(d, allow_tools);
+        d = reputation_policy::apply_reputation(d, allow_tools, &recs, &rep_thresholds);
         // In stub mode we still allow content to be appended, but never allow tools.
         d.risk_level = sentry::RiskLevel::Medium;
         d.action = sentry::Action::Allow;
@@ -602,6 +609,7 @@ async fn ingest_source(
 
     let decision = enforce_markup_tools_cap(decision, is_markup);
     let decision = enforce_tools_authorization(decision, allow_tools);
+    let decision = reputation_policy::apply_reputation(decision, allow_tools, &recs, &rep_thresholds);
 
     let resp = IngestResponse {
         digest: DigestInfo {
