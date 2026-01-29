@@ -1,4 +1,6 @@
-use crate::{introspection, reputation, reputation_policy, routes, sentry, state, threat};
+use crate::{
+    introspection, reputation, reputation_policy, routes, sentry, state, threat, xml_scan,
+};
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
@@ -329,7 +331,19 @@ pub async fn ingest_source(
     let original_length_chars = raw.chars().count();
     let model_length_chars = model_text.chars().count();
 
-    let threat_full = threat::assess(&model_text);
+    let mut threat_full = threat::assess(&model_text);
+
+    // Cheap XML/SVG/HTML red-flag scan (pre-parse style signals). This does not replace
+    // sandboxing/rlimits; it's for scoring + audit visibility.
+    if is_markup {
+        let scan = xml_scan::scan(&raw);
+        if scan.severity > 0 {
+            threat_full.threat_score = threat_full.threat_score.saturating_add(scan.severity);
+            for m in scan.matches {
+                threat_full.indicators.push(format!("xml_scan:{}", m));
+            }
+        }
+    }
 
     let audit_mode = std::env::var("ACIP_AUDIT_MODE")
         .map(|v| v.trim().eq("ENABLED"))

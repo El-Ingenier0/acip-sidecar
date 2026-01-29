@@ -12,3 +12,4 @@ pub mod sentry;
 pub mod state;
 pub mod threat;
 pub mod token_auth;
+pub mod xml_scan;
