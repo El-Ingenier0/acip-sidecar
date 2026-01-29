@@ -60,6 +60,19 @@ podman run --rm --network=none \
   acip-sidecar:latest
 ```
 
+## Extractor knobs
+
+The image sets:
+- `ACIP_EXTRACTOR_BIN=/opt/acip/acip-extract`
+
+You can tune limits via env:
+- `ACIP_EXTRACTOR_TIMEOUT_SECS`
+- `ACIP_EXTRACTOR_RLIMIT_AS_MB`
+- `ACIP_EXTRACTOR_RLIMIT_NOFILE`
+- `ACIP_EXTRACTOR_RLIMIT_FSIZE_MB`
+- `ACIP_EXTRACTOR_NICE`
+- `ACIP_EXTRACTOR_RLIMIT_NPROC` (opt-in)
+
 ## Smoke test
 
 ```bash

@@ -107,6 +107,18 @@ curl -sS \
   http://127.0.0.1:18795/v1/acip/ingest_source | jq
 ```
 
+## Sandbox/extractor knobs (optional)
+
+These env vars tune the **out-of-process extractor** (PDF/SVG hybrid extraction):
+
+- `ACIP_EXTRACTOR_BIN` (default: `acip-extract`): path to extractor helper
+- `ACIP_EXTRACTOR_TIMEOUT_SECS` (default: `180`): wall timeout for extractor
+- `ACIP_EXTRACTOR_RLIMIT_AS_MB` (default: `2048`): max address space
+- `ACIP_EXTRACTOR_RLIMIT_NOFILE` (default: `64`): max open fds
+- `ACIP_EXTRACTOR_RLIMIT_FSIZE_MB` (default: `512`): max file size helper may create
+- `ACIP_EXTRACTOR_NICE` (default: `10`): niceness increment
+- `ACIP_EXTRACTOR_RLIMIT_NPROC` (optional): cap processes/threads (opt-in; can break some tools)
+
 ## Notes
 
 - `ACIP_SENTRY_MODE=stub` disables model calls; `tools_allowed` stays false.

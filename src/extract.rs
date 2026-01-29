@@ -295,18 +295,37 @@ pub fn extract(req: &ExtractRequest, bytes: &[u8]) -> Result<ExtractResponse> {
     }
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum ExtractorError {
+    #[error("extractor timeout")]
+    Timeout,
+
+    #[error("spawn extractor failed: {0}")]
+    Spawn(String),
+
+    #[error("extractor failed (exit={exit_code:?}): {stderr}")]
+    NonZeroExit {
+        exit_code: Option<i32>,
+        stderr: String,
+    },
+
+    #[error("extractor output invalid: {0}")]
+    OutputParse(String),
+}
+
 /// Spawn the external extractor helper (`acip-extract`) and return its JSON response.
 ///
 /// Linux-only v1 sandboxing (pure Rust):
-/// - set rlimits (cpu/as/nofile)
+/// - set rlimits (cpu/as/nofile/core/fsize)
 /// - set PR_SET_NO_NEW_PRIVS
 /// - set PR_SET_PDEATHSIG=SIGKILL
+/// - nice/ionice/umask
 /// - kill helper on timeout
 pub fn run_helper(
     req: &ExtractRequest,
     bytes: &[u8],
     timeout: Duration,
-) -> Result<ExtractResponse> {
+) -> std::result::Result<ExtractResponse, ExtractorError> {
     let bin = std::env::var("ACIP_EXTRACTOR_BIN").unwrap_or_else(|_| "acip-extract".to_string());
 
     let mut cmd = Command::new(bin);
@@ -424,38 +443,50 @@ pub fn run_helper(
         });
     }
 
-    let mut child = cmd.spawn().context("spawn acip-extract")?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| ExtractorError::Spawn(e.to_string()))?;
 
     let stdin = child
         .stdin
         .as_mut()
-        .ok_or_else(|| anyhow!("missing stdin"))?;
+        .ok_or_else(|| ExtractorError::Spawn("missing stdin".to_string()))?;
 
-    let header = serde_json::to_string(req).context("serialize request")?;
-    stdin.write_all(header.as_bytes()).context("write header")?;
-    stdin.write_all(b"\n").context("write header newline")?;
-    stdin.write_all(bytes).context("write payload")?;
+    let header =
+        serde_json::to_string(req).map_err(|e| ExtractorError::OutputParse(e.to_string()))?;
+    stdin
+        .write_all(header.as_bytes())
+        .map_err(|e| ExtractorError::Spawn(e.to_string()))?;
+    stdin
+        .write_all(b"\n")
+        .map_err(|e| ExtractorError::Spawn(e.to_string()))?;
+    stdin
+        .write_all(bytes)
+        .map_err(|e| ExtractorError::Spawn(e.to_string()))?;
     drop(child.stdin.take());
 
     let Some(status) = child
         .wait_timeout(timeout)
-        .context("wait_timeout acip-extract")?
+        .map_err(|e| ExtractorError::Spawn(e.to_string()))?
     else {
         let _ = child.kill();
         let _ = child.wait();
-        return Err(anyhow!("acip-extract timeout"));
+        return Err(ExtractorError::Timeout);
     };
 
     let output = child
         .wait_with_output()
-        .context("wait_with_output acip-extract")?;
+        .map_err(|e| ExtractorError::Spawn(e.to_string()))?;
 
     if !status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("acip-extract failed: {}", err.trim()));
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(ExtractorError::NonZeroExit {
+            exit_code: status.code(),
+            stderr: err,
+        });
     }
 
-    let resp: ExtractResponse =
-        serde_json::from_slice(&output.stdout).context("parse extract json")?;
+    let resp: ExtractResponse = serde_json::from_slice(&output.stdout)
+        .map_err(|e| ExtractorError::OutputParse(e.to_string()))?;
     Ok(resp)
 }

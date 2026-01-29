@@ -61,6 +61,17 @@ Logs:
 journalctl --user -u moltbot-acip-sidecar -f
 ```
 
+## Extractor sandbox knobs (optional)
+
+Same knobs as system install (see `docs/install.md`), typically set via `systemctl --user edit`:
+
+- `ACIP_EXTRACTOR_TIMEOUT_SECS`
+- `ACIP_EXTRACTOR_RLIMIT_AS_MB`
+- `ACIP_EXTRACTOR_RLIMIT_NOFILE`
+- `ACIP_EXTRACTOR_RLIMIT_FSIZE_MB`
+- `ACIP_EXTRACTOR_NICE`
+- `ACIP_EXTRACTOR_RLIMIT_NPROC` (opt-in)
+
 ## Smoke test
 
 ```bash
