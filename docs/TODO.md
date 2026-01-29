@@ -45,7 +45,7 @@ Legend: **P0** = critical, **P1** = high, **P2** = medium, **P3** = low.
 - [x] **Docs**: document the tool-authorization header and expected behavior.
 - [x] **Tests**: ensure model cannot enable tools without explicit authorization.
 - [x] **Tests**: unit tests for taxonomy + detectors + reputation bumping.
-- [ ] **Integration tests (attack suite)**: add HTTP-level tests that POST /v1/acip/ingest_source with a corpus of attack fixtures (prompt injection, tool coercion, exfiltration, credential theft, jailbreak/social engineering) and assert invariants (e.g., tools hard-caps; risk escalation; threat fields populated).
+- [x] **Integration tests (attack suite)**: add HTTP-level tests that POST /v1/acip/ingest_source with a corpus of attack fixtures (prompt injection, tool coercion, exfiltration, credential theft, jailbreak/social engineering) and assert invariants (e.g., tools hard-caps; risk escalation; threat fields populated).
 
 ## Installation & ops (MVP)
 - [x] **Create install guide**: prerequisites, build/run, config paths, secrets file, policies file.
