@@ -29,6 +29,12 @@ main() {
     exit 1
   fi
 
+  echo "WARNING: Installing as a *user* service trades away key isolation hardening." 
+  echo "- The sidecar and extractor run with your user permissions (no dedicated service user)." 
+  echo "- Best isolation/hardening requires the system service install (root) running as user 'acip'." 
+  echo "Proceeding with user-mode install..."
+  echo
+
   echo "[1/5] Building release binary"
   cargo build --release
 
