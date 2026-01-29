@@ -38,7 +38,7 @@ Legend: **P0** = critical, **P1** = high, **P2** = medium, **P3** = low.
 - [x] **Oracle leakage control**: return a minimal/public threat summary plus separate audit/internal threat detail; gate internal detail behind `ACIP_AUDIT_MODE=ENABLED`.
 - [x] **Source reputation store**: persist per-source_id / per-host counters (seen, suspected_attacks, last_seen, last_attack_types).
 - [x] **Raise risk for bad actors**: if source reputation is bad, bump threat_score / risk_level and cap tools even for non-markup unless explicitly overridden.
-- [ ] **Reputation decay**: apply adaptive half-life so one-off incidents decay quickly, repeat offenders decay slowly; thresholds use effective risk.
+- [x] **Reputation decay**: apply adaptive half-life so one-off incidents decay quickly, repeat offenders decay slowly; thresholds use effective risk.
 
 ## Tool-call gating (CIF alignment)
 - [x] **Require explicit tool authorization**: default `tools_allowed=false` for all untrusted content; only allow tools if caller explicitly requests/authorizes via header (and policy permits).

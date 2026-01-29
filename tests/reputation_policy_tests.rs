@@ -19,6 +19,10 @@ fn reputation_bumps_risk() {
         key: "host:evil.com".to_string(),
         risk_score: 25,
         suspected_attack_count: 1,
+        last_seen_unix: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
         ..Default::default()
     };
 
@@ -26,6 +30,8 @@ fn reputation_bumps_risk() {
         medium_score: 20,
         high_score: 50,
         bad_actor_score: 150,
+        half_life_base_days: 2.0,
+        half_life_k: 0.5,
     };
 
     let out = apply_reputation(base_decision(false), false, &[rec], &t);
@@ -41,6 +47,10 @@ fn explicit_tool_auth_overrides_until_bad_actor_cutoff() {
         key: "host:sketchy.com".to_string(),
         risk_score: 80,
         suspected_attack_count: 2,
+        last_seen_unix: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
         ..Default::default()
     };
 
@@ -48,6 +58,8 @@ fn explicit_tool_auth_overrides_until_bad_actor_cutoff() {
         medium_score: 20,
         high_score: 50,
         bad_actor_score: 150,
+        half_life_base_days: 2.0,
+        half_life_k: 0.5,
     };
 
     // Model wants tools, caller authorizes tools.
@@ -63,6 +75,10 @@ fn bad_actor_cutoff_always_caps_tools() {
         key: "host:evil.com".to_string(),
         risk_score: 200,
         suspected_attack_count: 5,
+        last_seen_unix: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
         ..Default::default()
     };
 
@@ -70,6 +86,8 @@ fn bad_actor_cutoff_always_caps_tools() {
         medium_score: 20,
         high_score: 50,
         bad_actor_score: 150,
+        half_life_base_days: 2.0,
+        half_life_k: 0.5,
     };
 
     let out = apply_reputation(base_decision(true), true, &[rec], &t);
