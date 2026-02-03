@@ -1,12 +1,17 @@
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{
-    io::Write,
+    fs::{self, File, OpenOptions},
+    io::{Read, Write},
+    path::Path,
     process::{Command, Stdio},
     time::Duration,
 };
-use tempfile::tempdir;
+use tempfile::{tempdir, Builder};
 use wait_timeout::ChildExt;
+
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 #[cfg(target_os = "linux")]
 mod seccomp {
@@ -374,14 +379,70 @@ pub enum ExtractorError {
     #[error("spawn extractor failed: {0}")]
     Spawn(String),
 
+    #[error("extractor io failed: {0}")]
+    Io(String),
+
     #[error("extractor failed (exit={exit_code:?}): {stderr}")]
     NonZeroExit {
         exit_code: Option<i32>,
         stderr: String,
     },
 
+    #[error("extractor output exceeded limit ({bytes} bytes > {max_bytes} bytes)")]
+    OutputTooLarge { bytes: u64, max_bytes: u64 },
+
     #[error("extractor output invalid: {0}")]
     OutputParse(String),
+}
+
+fn default_max_output_chars(req: &ExtractRequest) -> usize {
+    req.max_output_chars.unwrap_or_else(|| match req.kind {
+        ExtractKind::Pdf => 2_000_000,
+        ExtractKind::Svg => 500_000,
+    })
+}
+
+fn output_cap_bytes(req: &ExtractRequest) -> u64 {
+    let max_chars = default_max_output_chars(req) as u64;
+    let max_bytes = max_chars
+        .saturating_mul(4)
+        .saturating_add(1_048_576);
+    max_bytes.min(33_554_432)
+}
+
+fn create_secure_file(path: &Path) -> std::result::Result<(), ExtractorError> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        options.mode(0o600);
+    }
+    options
+        .open(path)
+        .map_err(|e| ExtractorError::Io(e.to_string()))?;
+
+    #[cfg(not(unix))]
+    {
+        let _ = fs::set_permissions(path, fs::Permissions::from_readonly(false));
+    }
+
+    Ok(())
+}
+
+fn read_limited_file(path: &Path, max_bytes: u64) -> std::result::Result<Vec<u8>, ExtractorError> {
+    let file = File::open(path).map_err(|e| ExtractorError::OutputParse(e.to_string()))?;
+    let mut limited = file.take(max_bytes.saturating_add(1));
+    let mut buf = Vec::new();
+    limited
+        .read_to_end(&mut buf)
+        .map_err(|e| ExtractorError::OutputParse(e.to_string()))?;
+    if (buf.len() as u64) > max_bytes {
+        return Err(ExtractorError::OutputTooLarge {
+            bytes: buf.len() as u64,
+            max_bytes,
+        });
+    }
+    Ok(buf)
 }
 
 /// Spawn the external extractor helper (`acip-extract`) and return its JSON response.
@@ -399,7 +460,26 @@ pub fn run_helper(
 ) -> std::result::Result<ExtractResponse, ExtractorError> {
     let bin = std::env::var("ACIP_EXTRACTOR_BIN").unwrap_or_else(|_| "acip-extract".to_string());
 
-    let tmpdir = std::env::var("ACIP_EXTRACTOR_TMPDIR").unwrap_or_else(|_| "".to_string());
+    let tmpdir_env = std::env::var("ACIP_EXTRACTOR_TMPDIR")
+        .ok()
+        .filter(|v| !v.trim().is_empty());
+
+    let mut builder = Builder::new();
+    builder.prefix("acip-extractor-");
+    let output_dir = match tmpdir_env.as_deref() {
+        Some(base) => builder.tempdir_in(base),
+        None => builder.tempdir(),
+    }
+    .map_err(|e| ExtractorError::Io(e.to_string()))?;
+
+    #[cfg(unix)]
+    fs::set_permissions(output_dir.path(), fs::Permissions::from_mode(0o700))
+        .map_err(|e| ExtractorError::Io(e.to_string()))?;
+
+    let out_path = output_dir.path().join("out.json");
+    let err_path = output_dir.path().join("err.log");
+    create_secure_file(&out_path)?;
+    create_secure_file(&err_path)?;
 
     let mut cmd = Command::new(bin);
     cmd.env_clear().env("PATH", "/usr/bin:/bin");
@@ -414,6 +494,7 @@ pub fn run_helper(
         "ACIP_EXTRACTOR_SECCOMP",
         // Test-only/debug passthrough.
         "ACIP_EXTRACTOR_SELFTEST_NET",
+        "ACIP_EXTRACTOR_SELFTEST_LARGE",
     ] {
         if let Ok(v) = std::env::var(key) {
             if !v.trim().is_empty() {
@@ -422,12 +503,14 @@ pub fn run_helper(
         }
     }
 
-    if !tmpdir.trim().is_empty() {
+    if let Some(tmpdir) = tmpdir_env.as_ref() {
         cmd.env("TMPDIR", tmpdir);
     }
+    cmd.env("ACIP_EXTRACTOR_OUT", &out_path)
+        .env("ACIP_EXTRACTOR_ERR", &err_path);
     cmd.stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
 
     #[cfg(unix)]
     unsafe {
@@ -581,19 +664,20 @@ pub fn run_helper(
         return Err(ExtractorError::Timeout);
     };
 
-    let output = child
-        .wait_with_output()
-        .map_err(|e| ExtractorError::Spawn(e.to_string()))?;
-
     if !status.success() {
-        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let err = fs::read_to_string(&err_path)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
         return Err(ExtractorError::NonZeroExit {
             exit_code: status.code(),
             stderr: err,
         });
     }
 
-    let resp: ExtractResponse = serde_json::from_slice(&output.stdout)
+    let max_bytes = output_cap_bytes(req);
+    let output = read_limited_file(&out_path, max_bytes)?;
+    let resp: ExtractResponse = serde_json::from_slice(&output)
         .map_err(|e| ExtractorError::OutputParse(e.to_string()))?;
     Ok(resp)
 }
