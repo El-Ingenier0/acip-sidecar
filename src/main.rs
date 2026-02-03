@@ -1,6 +1,6 @@
 use axum::{routing::post, Router};
 use clap::Parser;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf};
 use tracing::{info, warn};
 
 use acip_sidecar::{
