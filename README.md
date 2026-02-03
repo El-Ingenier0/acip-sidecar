@@ -35,6 +35,10 @@ Secrets resolution order when `--secrets-file` is provided:
 1) secrets file
 2) process environment
 
+## Install modes
+
+See: `docs/install-modes.md`
+
 ## CLI (configuration + exercise)
 
 `acipctl` is a small companion CLI so the sidecar is fully configurable/usable even when it runs in Docker.
