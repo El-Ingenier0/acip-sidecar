@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use serde_json::Value;
 use std::{
     fs,
-    io::{self, Read},
+    io::{self, Read, Write},
     path::PathBuf,
 };
 
@@ -27,7 +27,9 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Cmd {
-    /// Print or validate configuration
+    /// Print/validate/update configuration.
+    ///
+    /// "Persistent" means editing the config file on disk.
     Config {
         #[command(subcommand)]
         cmd: ConfigCmd,
@@ -77,6 +79,16 @@ enum Cmd {
     },
 }
 
+#[derive(Debug, Clone, clap::ValueEnum)]
+enum RestartMode {
+    /// systemd global service (default). Runs: sudo systemctl restart acip-sidecar
+    System,
+    /// systemd user service. Runs: systemctl --user restart acip-sidecar
+    User,
+    /// Docker compose: print the docker compose restart command (does not run it)
+    DockerCompose,
+}
+
 #[derive(Debug, Subcommand)]
 enum ConfigCmd {
     /// Print a config example to stdout
@@ -87,22 +99,76 @@ enum ConfigCmd {
         #[arg(long)]
         path: PathBuf,
     },
+
+    /// Show current config file (raw TOML)
+    Show {
+        #[arg(long)]
+        path: PathBuf,
+    },
+
+    /// Set a config value and (by default) restart the service.
+    ///
+    /// Key format: dotted path, e.g. `server.unix_socket` or `policy.head`.
+    Set {
+        #[arg(long)]
+        path: PathBuf,
+
+        /// Dotted key (e.g. server.unix_socket)
+        key: String,
+
+        /// Value. Simple auto-typing is supported: true/false, ints, floats, or string.
+        value: String,
+
+        /// Restart mode. Default: systemd global.
+        #[arg(long, value_enum, default_value_t = RestartMode::System)]
+        restart: RestartMode,
+
+        /// For docker-compose restart command output: docker compose file path
+        #[arg(long, default_value = "docker-compose.yml")]
+        compose_file: String,
+
+        /// For docker-compose restart command output: service name
+        #[arg(long, default_value = "acip-sidecar")]
+        compose_service: String,
+
+        /// Do not restart; only edit the config file.
+        #[arg(long, default_value_t = false)]
+        no_restart: bool,
+    },
+
+    /// Unset a config value (remove key) and (by default) restart the service.
+    ///
+    /// Key format: dotted path, e.g. `server.unix_socket`.
+    Unset {
+        #[arg(long)]
+        path: PathBuf,
+
+        /// Dotted key (e.g. server.unix_socket)
+        key: String,
+
+        /// Restart mode. Default: systemd global.
+        #[arg(long, value_enum, default_value_t = RestartMode::System)]
+        restart: RestartMode,
+
+        /// For docker-compose restart command output: docker compose file path
+        #[arg(long, default_value = "docker-compose.yml")]
+        compose_file: String,
+
+        /// For docker-compose restart command output: service name
+        #[arg(long, default_value = "acip-sidecar")]
+        compose_service: String,
+
+        /// Do not restart; only edit the config file.
+        #[arg(long, default_value_t = false)]
+        no_restart: bool,
+    },
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.cmd {
-        Cmd::Config { cmd } => match cmd {
-            ConfigCmd::Example => {
-                let ex = include_str!("../../config.example.toml");
-                print!("{ex}");
-            }
-            ConfigCmd::Validate { path } => {
-                let _ = config::Config::load(&path).with_context(|| format!("load {path:?}"))?;
-                eprintln!("OK: {path:?}");
-            }
-        },
+        Cmd::Config { cmd } => handle_config(cmd)?,
 
         Cmd::Health => {
             let u = format!("{}/health", cli.url.trim_end_matches('/'));
@@ -171,6 +237,196 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn handle_config(cmd: ConfigCmd) -> Result<()> {
+    match cmd {
+        ConfigCmd::Example => {
+            let ex = include_str!("../../config.example.toml");
+            print!("{ex}");
+            Ok(())
+        }
+        ConfigCmd::Validate { path } => {
+            let _ = config::Config::load(&path).with_context(|| format!("load {path:?}"))?;
+            eprintln!("OK: {path:?}");
+            Ok(())
+        }
+        ConfigCmd::Show { path } => {
+            let txt = fs::read_to_string(&path).with_context(|| format!("read {path:?}"))?;
+            print!("{txt}");
+            Ok(())
+        }
+        ConfigCmd::Set {
+            path,
+            key,
+            value,
+            restart,
+            compose_file,
+            compose_service,
+            no_restart,
+        } => {
+            set_config_value(&path, &key, &value)?;
+            if no_restart {
+                return Ok(());
+            }
+            restart_service(restart, &compose_file, &compose_service)
+        }
+        ConfigCmd::Unset {
+            path,
+            key,
+            restart,
+            compose_file,
+            compose_service,
+            no_restart,
+        } => {
+            unset_config_value(&path, &key)?;
+            if no_restart {
+                return Ok(());
+            }
+            restart_service(restart, &compose_file, &compose_service)
+        }
+    }
+}
+
+fn parse_toml_value(s: &str) -> toml_edit::Item {
+    let t = s.trim();
+    if matches!(t.to_lowercase().as_str(), "true" | "false") {
+        return toml_edit::value(t.eq_ignore_ascii_case("true"));
+    }
+    if let Ok(i) = t.parse::<i64>() {
+        return toml_edit::value(i);
+    }
+    if let Ok(f) = t.parse::<f64>() {
+        return toml_edit::value(f);
+    }
+    toml_edit::value(t)
+}
+
+fn set_config_value(path: &PathBuf, dotted_key: &str, value: &str) -> Result<()> {
+    let raw = fs::read_to_string(path).with_context(|| format!("read {path:?}"))?;
+    let mut doc = raw
+        .parse::<toml_edit::DocumentMut>()
+        .context("parse toml")?;
+
+    let parts: Vec<&str> = dotted_key.split('.').filter(|p| !p.is_empty()).collect();
+    if parts.is_empty() {
+        anyhow::bail!("invalid key");
+    }
+
+    let mut cur: &mut toml_edit::Item = doc.as_item_mut();
+    for (i, p) in parts.iter().enumerate() {
+        let last = i == parts.len() - 1;
+        if last {
+            cur[p] = parse_toml_value(value);
+        } else {
+            // Ensure intermediate tables.
+            if !cur[p].is_table() {
+                cur[p] = toml_edit::table();
+            }
+            cur = &mut cur[p];
+        }
+    }
+
+    // Validate by deserializing with the real config struct.
+    let new_txt = doc.to_string();
+    let _: config::Config = toml::from_str(&new_txt).context("validate config")?;
+
+    write_atomic(path, &new_txt)?;
+    eprintln!("OK: set {dotted_key} in {path:?}");
+    Ok(())
+}
+
+fn unset_config_value(path: &PathBuf, dotted_key: &str) -> Result<()> {
+    let raw = fs::read_to_string(path).with_context(|| format!("read {path:?}"))?;
+    let mut doc = raw
+        .parse::<toml_edit::DocumentMut>()
+        .context("parse toml")?;
+
+    let parts: Vec<&str> = dotted_key.split('.').filter(|p| !p.is_empty()).collect();
+    if parts.is_empty() {
+        anyhow::bail!("invalid key");
+    }
+
+    // Walk to parent.
+    let mut cur: &mut toml_edit::Item = doc.as_item_mut();
+    for p in &parts[..parts.len() - 1] {
+        if cur[p].is_none() {
+            // Nothing to do.
+            return Ok(());
+        }
+        cur = &mut cur[p];
+    }
+
+    if let Some(table) = cur.as_table_mut() {
+        table.remove(parts[parts.len() - 1]);
+    } else {
+        // Parent isn't a table; nothing to remove.
+        return Ok(());
+    }
+
+    let new_txt = doc.to_string();
+    let _: config::Config = toml::from_str(&new_txt).context("validate config")?;
+
+    write_atomic(path, &new_txt)?;
+    eprintln!("OK: unset {dotted_key} in {path:?}");
+    Ok(())
+}
+
+fn write_atomic(path: &PathBuf, contents: &str) -> Result<()> {
+    let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let mut tf = tempfile::NamedTempFile::new_in(dir).context("create temp file")?;
+    tf.write_all(contents.as_bytes()).context("write temp")?;
+    tf.flush().ok();
+    tf.persist(path).map_err(|e| anyhow::anyhow!(e)).context("persist")?;
+    Ok(())
+}
+
+fn restart_service(mode: RestartMode, compose_file: &str, compose_service: &str) -> Result<()> {
+    match mode {
+        RestartMode::System => {
+            // Try without sudo first; if it fails, try sudo.
+            let status = std::process::Command::new("systemctl")
+                .args(["restart", "acip-sidecar"])
+                .status();
+            if status.map(|s| s.success()).unwrap_or(false) {
+                return Ok(());
+            }
+            let st2 = std::process::Command::new("sudo")
+                .args(["systemctl", "restart", "acip-sidecar"])
+                .status()
+                .context("run sudo systemctl")?;
+            if !st2.success() {
+                anyhow::bail!("restart failed");
+            }
+            Ok(())
+        }
+        RestartMode::User => {
+            let st = std::process::Command::new("systemctl")
+                .args(["--user", "restart", "acip-sidecar"])
+                .status()
+                .context("run systemctl --user")?;
+            if !st.success() {
+                anyhow::bail!("restart failed");
+            }
+            Ok(())
+        }
+        RestartMode::DockerCompose => {
+            // By design: print the command, do not execute.
+            println!(
+                "docker compose -f {} restart {}",
+                shell_escape(compose_file),
+                shell_escape(compose_service)
+            );
+            Ok(())
+        }
+    }
+}
+
+fn shell_escape(s: &str) -> String {
+    if s.chars().all(|c| c.is_ascii_alphanumeric() || "-._/:".contains(c)) {
+        return s.to_string();
+    }
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 fn ingest_bytes(
