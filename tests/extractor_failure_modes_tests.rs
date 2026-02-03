@@ -134,7 +134,7 @@ async fn extractor_timeout_returns_408() {
     let script = dir.path().join("sleepy.sh");
     fs::write(
         &script,
-        "#!/bin/sh\n# sleep longer than the test timeout\nsleep 2\necho '{\"ok\":true,\"kind\":\"pdf\",\"text\":\"x\",\"warnings\":[],\"stats\":{\"text_chars\":1,\"ocr_used\":false,\"ocr_chars\":0}}'\n",
+        "#!/bin/sh\n# sleep longer than the test timeout\nsleep 2\nout='{\"ok\":true,\"kind\":\"pdf\",\"text\":\"x\",\"warnings\":[],\"stats\":{\"text_chars\":1,\"ocr_used\":false,\"ocr_chars\":0}}'\nif [ -n \"$ACIP_EXTRACTOR_OUT\" ]; then printf \"%s\" \"$out\" > \"$ACIP_EXTRACTOR_OUT\"; else printf \"%s\" \"$out\"; fi\n",
     )
     .unwrap();
     let mut perms = fs::metadata(&script).unwrap().permissions();
