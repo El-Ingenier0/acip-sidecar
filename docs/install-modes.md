@@ -4,19 +4,26 @@ Use this to pick the right deployment mode for **acip-sidecar**.
 
 > Goal: smallest attack surface with enough convenience.
 
+## Preference order (lowest blast radius → highest)
+
+1) **Mode D — Docker** (loopback-only)
+2) **Mode A — systemd global (direct `acip_user`)**
+3) **Mode B — systemd global (root-drop)** *(only when required)*
+4) **Mode C — systemd user service**
+
 ## Decision tree
 
-### 1) Are you running in Docker / containers?
+### 1) Can you run it in Docker (and do you want the smallest host blast radius)?
 - **Yes** → **Mode D: Docker**
 - **No** → go to (2)
 
 ### 2) Do you have systemd and want the service to survive logouts/reboots?
-- **No** → run manually (dev) or use **Mode C: systemd user service** if available
 - **Yes** → go to (3)
+- **No** → **Mode C: systemd user service** (or run manually for dev)
 
 ### 3) Do you need a privileged TCP port (<1024) or other root-only pre-bind setup?
 - **Yes** → **Mode B: systemd global (root-drop)**
-- **No** → **Mode A: systemd global (direct acip_user)**
+- **No** → **Mode A: systemd global (direct `acip_user`)**
 
 ### 4) Do you need a Unix domain socket (instead of TCP)?
 Any mode can use a Unix socket.
@@ -25,7 +32,18 @@ Any mode can use a Unix socket.
 
 ---
 
-## Mode A — systemd global (recommended): direct `acip_user`
+## Mode D — Docker (preferred if possible)
+
+Use when:
+- You want the smallest host blast radius.
+- You want the extraction toolchain (poppler/tesseract/libseccomp2) packaged.
+
+Docs:
+- `docs/docker.md`
+
+---
+
+## Mode A — systemd global (recommended if not using Docker): direct `acip_user`
 
 Use when:
 - You have systemd.
@@ -59,29 +77,13 @@ Unit:
 
 ---
 
-## Mode C — systemd user service
+## Mode C — systemd user service (highest blast radius)
 
 Use when:
-- You want convenience on a dev machine.
-- You accept reduced isolation.
+- Convenience on a dev machine is more important than isolation.
 
 Characteristics:
-- Runs as your user.
+- Runs with your full user permissions (home directory, etc.).
 
 Unit:
 - `packaging/acip-sidecar.user.service`
-
----
-
-## Mode D — Docker
-
-Use when:
-- You want the extraction toolchain (poppler/tesseract) packaged.
-- You want predictable runtime dependencies.
-
-Characteristics:
-- Runs as a non-root container user by default.
-- Expose loopback TCP or bind a unix socket.
-
-Docs:
-- `docs/docker.md`
