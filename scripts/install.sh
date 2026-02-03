@@ -8,12 +8,13 @@ set -euo pipefail
 # - Installs systemd unit
 # - Creates system user/group (acip_user)
 
-APP_USER="acip_user"
-APP_GROUP="acip_user"
+APP_USER=""
+APP_GROUP=""
 PREFIX="/opt/acip"
 ETC_DIR="/etc/acip"
 UNIT_SRC="packaging/acip-sidecar.service"
 UNIT_DST="/etc/systemd/system/acip-sidecar.service"
+DROPIN_DIR="/etc/systemd/system/acip-sidecar.service.d"
 
 need_root() {
   if [[ "${EUID}" -ne 0 ]]; then
@@ -33,6 +34,11 @@ parse_args() {
   # Defaults
   L1_MODEL="gemini-2.0-flash"
   L2_MODEL="claude-3-5-haiku-latest"
+  PORT="18795"
+  APP_USER_DEFAULT="acip_user"
+  APP_GROUP_DEFAULT="acip_user"
+  APP_USER_OVERRIDE=""
+  APP_GROUP_OVERRIDE=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -40,14 +46,21 @@ parse_args() {
         L1_MODEL="$2"; shift 2 ;;
       --l2-model)
         L2_MODEL="$2"; shift 2 ;;
+      --port)
+        PORT="$2"; shift 2 ;;
+      --user)
+        APP_USER_OVERRIDE="$2"; shift 2 ;;
+      --group)
+        APP_GROUP_OVERRIDE="$2"; shift 2 ;;
       -h|--help)
         cat <<'EOF'
-Usage: install.sh [--l1-model <model>] [--l2-model <model>]
+Usage: install.sh [--port <port>] [--user <user>] [--group <group>] [--l1-model <model>] [--l2-model <model>]
 
 This installer configures the default model policy via environment variables.
 
 Examples:
-  sudo ./scripts/install.sh --l1-model gemini-2.0-flash --l2-model claude-3-5-haiku-latest
+  sudo ./scripts/install.sh --port 18795 --user acip_user --group acip_user \
+    --l1-model gemini-2.0-flash --l2-model claude-3-5-haiku-latest
 EOF
         exit 0
         ;;
@@ -93,6 +106,18 @@ main() {
     exit 1
   fi
 
+  # Apply overrides
+  if [[ -n "${APP_USER_OVERRIDE}" ]]; then APP_USER="${APP_USER_OVERRIDE}"; fi
+  if [[ -n "${APP_GROUP_OVERRIDE}" ]]; then APP_GROUP="${APP_GROUP_OVERRIDE}"; fi
+  if [[ -z "${APP_USER}" ]]; then APP_USER="${APP_USER_DEFAULT}"; fi
+  if [[ -z "${APP_GROUP}" ]]; then APP_GROUP="${APP_GROUP_DEFAULT}"; fi
+
+  # Validate port
+  if ! [[ "${PORT}" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
+    echo "Invalid --port: ${PORT}" >&2
+    exit 1
+  fi
+
   echo "[1/6] Creating user/group ${APP_USER}:${APP_GROUP} (if needed)"
   getent group "${APP_GROUP}" >/dev/null 2>&1 || groupadd --system "${APP_GROUP}"
   id -u "${APP_USER}" >/dev/null 2>&1 || useradd --system --home /nonexistent --shell /usr/sbin/nologin --gid "${APP_GROUP}" "${APP_USER}"
@@ -111,6 +136,10 @@ main() {
   if [[ ! -f "${ETC_DIR}/config.toml" ]]; then
     echo "Writing ${ETC_DIR}/config.toml from config.example.toml"
     install -m 0644 config.example.toml "${ETC_DIR}/config.toml"
+
+    # Best-effort set configured port in the generated config.
+    # (If you later change the config manually, this script will not overwrite it.)
+    sed -i -E "s/^port\s*=\s*[0-9]+/port = ${PORT}/" "${ETC_DIR}/config.toml" 2>/dev/null || true
   else
     echo "Leaving existing ${ETC_DIR}/config.toml in place"
   fi
@@ -157,14 +186,22 @@ main() {
     exit 1
   fi
 
-  DROPIN_DIR="/etc/systemd/system/acip-sidecar.service.d"
   install -d -m 0755 "$DROPIN_DIR"
+
+  # Drop-in: models
   cat >"$DROPIN_DIR/10-models.conf" <<EOF
 [Service]
 Environment=ACIP_L1_PROVIDER=${L1_PROVIDER}
 Environment=ACIP_L1_MODEL=${L1_MODEL}
 Environment=ACIP_L2_PROVIDER=${L2_PROVIDER}
 Environment=ACIP_L2_MODEL=${L2_MODEL}
+EOF
+
+  # Drop-in: run user/group overrides (mirrors unit defaults)
+  cat >"$DROPIN_DIR/05-user.conf" <<EOF
+[Service]
+User=${APP_USER}
+Group=${APP_GROUP}
 EOF
 
   systemctl daemon-reload
