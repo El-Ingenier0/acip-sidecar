@@ -94,8 +94,8 @@ fn extract_json_only(s: &str) -> &str {
     s
 }
 
-fn salvage_enabled() -> bool {
-    std::env::var("ACIP_SENTRY_JSON_SALVAGE")
+fn strict_json_enabled() -> bool {
+    std::env::var("ACIP_SENTRY_JSON_STRICT")
         .map(|v| v == "1")
         .unwrap_or(false)
 }
@@ -113,10 +113,10 @@ fn parse_json_strict(raw: &str) -> Result<Value> {
 }
 
 pub fn parse_and_validate_decision(raw: &str) -> Result<Decision> {
-    let v = if salvage_enabled() {
-        parse_json_strict(raw).or_else(|_| parse_json_strict(extract_json_only(raw)))?
-    } else {
+    let v = if strict_json_enabled() {
         parse_json_strict(raw)?
+    } else {
+        parse_json_strict(raw).or_else(|_| parse_json_strict(extract_json_only(raw)))?
     };
 
     let compiled = &*DECISION_SCHEMA;

@@ -190,7 +190,7 @@ fn parse_validates_against_schema() {
 #[test]
 #[serial]
 fn strict_accepts_pure_json_with_whitespace() {
-    let _guard = EnvGuard::set("ACIP_SENTRY_JSON_SALVAGE", None);
+    let _guard = EnvGuard::set("ACIP_SENTRY_JSON_STRICT", Some("1"));
     let good = valid_decision_json();
     let wrapped = format!("\n  {good}  \n");
     assert!(parse_and_validate_decision(&wrapped).is_ok());
@@ -199,7 +199,7 @@ fn strict_accepts_pure_json_with_whitespace() {
 #[test]
 #[serial]
 fn strict_rejects_prefix_suffix_text() {
-    let _guard = EnvGuard::set("ACIP_SENTRY_JSON_SALVAGE", None);
+    let _guard = EnvGuard::set("ACIP_SENTRY_JSON_STRICT", Some("1"));
     let good = valid_decision_json();
     let wrapped = format!("prefix {good} suffix");
     assert!(parse_and_validate_decision(&wrapped).is_err());
@@ -207,8 +207,8 @@ fn strict_rejects_prefix_suffix_text() {
 
 #[test]
 #[serial]
-fn salvage_enabled_accepts_prefix_suffix() {
-    let _guard = EnvGuard::set("ACIP_SENTRY_JSON_SALVAGE", Some("1"));
+fn default_tolerant_accepts_prefix_suffix() {
+    let _guard = EnvGuard::set("ACIP_SENTRY_JSON_STRICT", None);
     let good = valid_decision_json();
     let wrapped = format!("prefix {good} suffix");
     let d = parse_and_validate_decision(&wrapped).unwrap();
